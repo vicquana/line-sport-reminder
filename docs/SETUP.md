@@ -22,8 +22,11 @@
 | Provider | `家庭健康小工具` |
 | 帳號介紹 | `每 45 分鐘提醒大家起來做 10 下深蹲、喝杯水，一起養成健康習慣。` |
 | Profile image／頭像 | [`assets/大家動起來-line-avatar-640.png`](../assets/大家動起來-line-avatar-640.png) |
+| Cover／背景圖片 | [`assets/大家動起來-line-cover-1080x878.png`](../assets/大家動起來-line-cover-1080x878.png) |
 
 頭像已輸出為 640 × 640 PNG，約 0.5 MB，符合 LINE 的 3 MB 上限；主要人物都位於中央圓形安全區。
+
+封面已輸出為 1080 × 878 PNG，約 1.25 MB，同時低於舊版封面圖片的 3 MB 上限與基本檔案背景圖片的 10 MB 上限。
 
 ## 二、下載 Node 套件
 
