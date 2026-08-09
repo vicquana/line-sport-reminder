@@ -1,0 +1,20 @@
+{
+  "name": "line-sport-reminder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "cf-typegen": "wrangler types --include-runtime=false",
+    "check": "pnpm run cf-typegen && tsc --noEmit && vitest run",
+    "deploy:dry": "wrangler deploy --dry-run",
+    "dev": "wrangler dev --test-scheduled",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "latest",
+    "typescript": "latest",
+    "vitest": "latest",
+    "wrangler": "latest"
+  },
+  "packageManager": "pnpm@11.20.0"
+}

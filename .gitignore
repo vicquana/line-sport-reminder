@@ -1,0 +1,8 @@
+node_modules/
+.pnpm-store/
+.dev.vars
+.wrangler/
+dist/
+worker-configuration.d.ts
+*.log
+.DS_Store

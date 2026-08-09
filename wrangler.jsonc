@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "line-sport-reminder",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "DEFAULT_TIMEZONE": "Asia/Taipei",
+    "DEFAULT_ACTIVE_START": "09:00",
+    "DEFAULT_ACTIVE_END": "18:00"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "line-sport-reminder-db",
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}
