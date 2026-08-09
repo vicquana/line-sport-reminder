@@ -14,6 +14,17 @@
 
 如果尚未啟用 Messaging API，請先進入 [LINE Official Account Manager](https://manager.line.biz/)，選擇官方帳號，從設定中的 Messaging API 啟用。現在不能直接在 LINE Developers Console 新建 Messaging API Channel；啟用官方帳號的 Messaging API 時會建立 Channel。啟用時請慎選 Provider，LINE 不允許事後任意更換或解除該 Provider。
 
+### 官方帳號建議資料
+
+| 欄位 | 建議內容 |
+|---|---|
+| 帳號名稱 | `大家動起來` |
+| Provider | `家庭健康小工具` |
+| 帳號介紹 | `每 45 分鐘提醒大家起來做 10 下深蹲、喝杯水，一起養成健康習慣。` |
+| Profile image／頭像 | [`assets/大家動起來-line-avatar-640.png`](../assets/大家動起來-line-avatar-640.png) |
+
+頭像已輸出為 640 × 640 PNG，約 0.5 MB，符合 LINE 的 3 MB 上限；主要人物都位於中央圓形安全區。
+
 ## 二、下載 Node 套件
 
 在專案目錄執行：
