@@ -12,7 +12,7 @@
 - LINE Developers Console 中對應的 Messaging API Channel。
 - 本機已安裝 `fnm` 與 `pnpm`。
 
-如果尚未啟用 Messaging API，請先進入 [LINE Official Account Manager](https://manager.line.biz/)，選擇官方帳號，從設定中的 Messaging API 啟用。現在不能直接在 LINE Developers Console 新建 Messaging API Channel；啟用官方帳號的 Messaging API 時會建立 Channel。
+如果尚未啟用 Messaging API，請先進入 [LINE Official Account Manager](https://manager.line.biz/)，選擇官方帳號，從設定中的 Messaging API 啟用。現在不能直接在 LINE Developers Console 新建 Messaging API Channel；啟用官方帳號的 Messaging API 時會建立 Channel。啟用時請慎選 Provider，LINE 不允許事後任意更換或解除該 Provider。
 
 ## 二、下載 Node 套件
 
@@ -81,18 +81,52 @@ pnpm wrangler d1 migrations apply line-sport-reminder-db --remote
 
 看到詢問是否套用時選擇 `Yes`。
 
-## 五、從 LINE 取得兩個密鑰
+## 五、完整設定 LINE Developers Console
 
 進入 [LINE Developers Console](https://developers.line.biz/console/)：
 
 1. 選擇正確的 Provider。
 2. 選擇官方帳號對應的 Messaging API Channel。
-3. 在 `Basic settings` 找到 `Channel secret`。
-4. 在 `Messaging API` 頁籤發行 Channel access token。
+
+### 5-1. Basic settings
+
+進入 `Basic settings／基本設定` 頁籤，確認：
+
+| 欄位 | 要做什麼 |
+|---|---|
+| `Channel type` | 應顯示 Messaging API |
+| `Provider` | 確認是這個專案使用的 Provider |
+| `Channel ID` | 僅供識別，本專案目前不需要保存 |
+| `Channel secret` | 複製後存成 Cloudflare Secret `LINE_CHANNEL_SECRET` |
+| `Your user ID` | 可用來辨認自己的 LINE user ID，本專案不需要寫死在程式裡 |
+
+`Channel secret` 是用來驗證 `x-line-signature` 的密鑰。不要貼到 GitHub、README、`.env` 範例或 `wrangler.jsonc`，也不要在群組中傳送。
+
+### 5-2. Messaging API
+
+進入 `Messaging API` 頁籤，依序確認：
+
+| 設定 | 值／動作 | 說明 |
+|---|---|---|
+| `Bot basic ID` | 不需修改 | 可用來搜尋或邀請官方帳號 |
+| `QR code` | 用個人 LINE 掃描 | 將官方帳號加為好友，方便測試與邀入群組 |
+| `Webhook URL` | 部署後填入 Worker `/webhook` 網址 | 第八節會操作 |
+| `Use webhook` | `Enabled` | 必須開啟，否則收不到按鈕與文字事件 |
+| `Webhook redelivery` | `Enabled` | 建議開啟；程式會用 `webhookEventId` 防止重複處理 |
+| `Allow bot to join group chats` | `Enabled` | 必須開啟；預設為關閉 |
+| `Greeting messages` | `Disabled` | 避免與程式訊息重複 |
+| `Auto-reply messages` | `Disabled` | 避免輸入 `OK` 時出現兩套回覆 |
+| `Channel access token` | 發行 Token | 存成 Cloudflare Secret `LINE_CHANNEL_ACCESS_TOKEN` |
+
+`Greeting messages` 和 `Auto-reply messages` 的 `Edit` 按鈕會開啟 LINE Official Account Manager；實際開關在該管理後台。
 
 第一版可使用 Console 提供的長期 Channel Access Token；正式長期營運可再改用 LINE 建議的 Channel Access Token v2.1。
 
-不要將這兩個值貼到 `.dev.vars.example` 或 `wrangler.jsonc`。
+不要反覆重新發行 Token；如果換了 Token，必須重新執行 `wrangler secret put LINE_CHANNEL_ACCESS_TOKEN`，否則已部署的 Bot 會無法發訊息。
+
+### 5-3. Security（選用）
+
+使用長期 Channel Access Token 時，LINE Console 的 `Security` 頁籤可限制呼叫 API 的來源 IP。不過一般 Cloudflare Workers 沒有固定單一出口 IP，因此本專案先不要設定 IP allowlist；錯誤限制會讓 Bot 無法發送訊息。
 
 ## 六、把 LINE 密鑰存入 Cloudflare
 
@@ -104,6 +138,23 @@ pnpm wrangler secret put LINE_CHANNEL_ACCESS_TOKEN
 ```
 
 每個命令會等待你貼上密鑰。貼上後按 Enter；密鑰不會寫進 Git。
+
+### 本機開發密鑰
+
+正式部署使用上述 Cloudflare Secrets。本機執行 `pnpm run dev` 時，另外建立不提交 Git 的 `.dev.vars`：
+
+```dotenv
+LINE_CHANNEL_SECRET=你的本機測試用-channel-secret
+LINE_CHANNEL_ACCESS_TOKEN=你的本機測試用-access-token
+```
+
+本專案的 `.gitignore` 會忽略：
+
+- `.dev.vars` 與 `.dev.vars.*`
+- `.env` 與 `.env.*`
+- 但允許安全的 `.dev.vars.example`、`.env.example` 被提交
+
+不要把真正密鑰寫進 `*.example` 檔案。
 
 ## 七、部署 Worker
 
@@ -138,21 +189,26 @@ https://line-sport-reminder.<你的-subdomain>.workers.dev/health
 {"status":"ok","service":"line-sport-reminder"}
 ```
 
-## 八、設定 LINE Webhook
+## 八、設定 LINE Webhook 與群組權限
 
 回到 LINE Developers Console 的 Messaging API Channel：
 
-1. 找到 `Webhook URL`。
-2. 填入 Worker 網址加 `/webhook`：
+1. 開啟 `Messaging API` 頁籤。
+2. 找到 `Webhook URL`，按 `Edit`。
+3. 填入 Worker 網址加 `/webhook`：
 
    ```text
    https://line-sport-reminder.<你的-subdomain>.workers.dev/webhook
    ```
 
-3. 按 `Verify`，應顯示成功。
-4. 開啟 `Use webhook`。
-5. 建議開啟 `Webhook redelivery`。
-6. 開啟 `Allow bot to join group chats`。
+4. 按 `Update` 保存。
+5. 按 `Verify`；LINE 會傳送一個 `events: []` 的測試請求，畫面應顯示 `Success`。
+6. 將 `Use webhook` 設為 `Enabled`。
+7. 將 `Webhook redelivery` 設為 `Enabled`。
+8. 將 `Allow bot to join group chats` 設為 `Enabled`。
+9. 用頁面上的 QR code 將官方帳號加為好友。
+
+Webhook URL 必須是公開的 HTTPS URL，不能使用 `localhost` 或自簽憑證，而且一個 Channel 只能設定一個 Webhook URL。
 
 注意：同一個 LINE 群組同時只能有一個官方帳號 Bot。
 
@@ -165,6 +221,8 @@ https://line-sport-reminder.<你的-subdomain>.workers.dev/health
 3. 關閉 `Auto-reply messages／自動回應訊息`。
 4. 建議先關閉 `Greeting messages／加入好友歡迎訊息`，避免測試時混淆。
 5. 保持 Messaging API／Webhook 模式啟用。
+
+本專案不需要在後台建立 Rich Menu。群組不會顯示官方帳號的一對一 Rich Menu；「完成／本輪跳過」已直接放在每輪 Flex Message 裡。
 
 ## 十、建立 LINE 群組並開始使用
 
@@ -226,6 +284,8 @@ https://line-sport-reminder.<你的-subdomain>.workers.dev/health
 - [ ] `Use webhook` 已開啟。
 - [ ] `Webhook redelivery` 已開啟。
 - [ ] `Allow bot to join group chats` 已開啟。
+- [ ] `Greeting messages` 與 `Auto-reply messages` 已關閉。
+- [ ] Cloudflare 已保存兩個 LINE Secrets。
 - [ ] 官方帳號可以加入群組。
 - [ ] 成員輸入「參加」會收到確認。
 - [ ] 管理者輸入「立即提醒」會出現兩按鈕卡片。
@@ -263,9 +323,11 @@ Rich Menu 顯示在使用者與官方帳號的一對一聊天室，不是群組�
 
 ## 官方參考文件
 
+- [LINE：Get started with the Messaging API](https://developers.line.biz/en/docs/messaging-api/getting-started/)
 - [LINE：Build a bot](https://developers.line.biz/en/docs/messaging-api/building-bot/)
 - [LINE：Group chats](https://developers.line.biz/en/docs/messaging-api/group-chats/)
 - [LINE：Webhook](https://developers.line.biz/en/docs/messaging-api/receiving-messages/)
+- [LINE：Verify webhook URL](https://developers.line.biz/en/docs/messaging-api/verify-webhook-url/)
 - [LINE：Messaging API reference](https://developers.line.biz/en/reference/messaging-api/nojs/)
 - [Cloudflare：Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
 - [Cloudflare：D1 Worker API](https://developers.cloudflare.com/d1/worker-api/)

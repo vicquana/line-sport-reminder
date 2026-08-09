@@ -61,6 +61,7 @@ curl "http://localhost:8787/cdn-cgi/handler/scheduled?format=json"
 ## 安全注意事項
 
 - 不要把 Channel Secret 或 Channel Access Token 寫進 Git。
+- `.env`、`.env.*`、`.dev.vars` 與 `.dev.vars.*` 已列入 `.gitignore`；真正密鑰只能放在本機或 Cloudflare Secrets。
 - 正式環境使用 `wrangler secret put` 保存密鑰。
 - Webhook 只接受簽章正確的 LINE 請求。
 - 管理員權限以 LINE `userId` 保存，不依賴可變更的顯示名稱。
