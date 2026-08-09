@@ -185,16 +185,16 @@ pnpm run deploy:dry
 pnpm wrangler deploy
 ```
 
-部署完成後會顯示網址，例如：
+部署完成後的正式網址：
 
 ```text
-https://line-sport-reminder.<你的-subdomain>.workers.dev
+https://line-sport-reminder.2000yeeder.workers.dev
 ```
 
 先在瀏覽器開啟：
 
 ```text
-https://line-sport-reminder.<你的-subdomain>.workers.dev/health
+https://line-sport-reminder.2000yeeder.workers.dev/health
 ```
 
 正確結果：
@@ -212,7 +212,7 @@ https://line-sport-reminder.<你的-subdomain>.workers.dev/health
 3. 填入 Worker 網址加 `/webhook`：
 
    ```text
-   https://line-sport-reminder.<你的-subdomain>.workers.dev/webhook
+   https://line-sport-reminder.2000yeeder.workers.dev/webhook
    ```
 
 4. 按 `Update` 保存。
