@@ -58,13 +58,20 @@ database_name = "line-sport-reminder-db"
 database_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 ```
 
-開啟 `wrangler.jsonc`，將：
+Wrangler 新版本可能會自動把資料庫 binding 加到 `wrangler.jsonc`。開啟該檔案並確認 `d1_databases` 最後只保留一筆，而且 binding 名稱必須是程式使用的 `DB`：
 
 ```json
-"database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+"d1_databases": [
+  {
+    "binding": "DB",
+    "database_name": "line-sport-reminder-db",
+    "database_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "migrations_dir": "migrations"
+  }
+]
 ```
 
-換成剛才取得的 `database_id`。
+將範例 UUID 換成剛才取得的 `database_id`。如果 Wrangler 自動加入了 `line_sport_reminder_db` 等第二筆 binding，請合併成上面唯一一筆；不要保留 `REPLACE_WITH_YOUR_D1_DATABASE_ID`。
 
 套用正式資料庫 Migration：
 
