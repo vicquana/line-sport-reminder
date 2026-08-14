@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { verifyLineSignature } from "../src/line";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { LineClient, verifyLineSignature } from "../src/line";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 async function sign(body: string, secret: string): Promise<string> {
   const encoder = new TextEncoder();
@@ -26,5 +31,53 @@ describe("verifyLineSignature", () => {
 
   it("拒絕不合法 base64", async () => {
     await expect(verifyLineSignature("{}", "not-valid-base64!", "secret")).resolves.toBe(false);
+  });
+});
+
+describe("LineClient.push", () => {
+  it("5xx 時使用同一個 retry key 安全重試", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 500 }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const retryKey = "4c476a24-9d64-4c1a-8d3f-bf4da024fc72";
+    await new LineClient("token").push("C123", [{ type: "text", text: "test" }], retryKey);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const call of fetchMock.mock.calls) {
+      const init = call[1] as RequestInit;
+      expect(init.headers).toMatchObject({ "X-Line-Retry-Key": retryKey });
+    }
+  });
+
+  it("LINE 回傳 409 時視為相同 retry key 已成功送達", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 409 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new LineClient("token").push(
+        "C123",
+        [{ type: "text", text: "test" }],
+        "4c476a24-9d64-4c1a-8d3f-bf4da024fc72",
+      ),
+    ).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("不可重試的 4xx 不會重送", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 400 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new LineClient("token").push(
+        "C123",
+        [{ type: "text", text: "test" }],
+        "4c476a24-9d64-4c1a-8d3f-bf4da024fc72",
+      ),
+    ).rejects.toThrow("HTTP 400");
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });

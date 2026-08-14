@@ -1,26 +1,35 @@
 import { parseCommand, parsePostback } from "./commands";
 import { LineClient } from "./line";
-import { buildPendingMentionMessage, buildRoundMessages, HELP_TEXT } from "./messages";
+import { buildRoundMessages, HELP_TEXT } from "./messages";
 import { Repository, type GroupDefaults } from "./repository";
 import { formatTimeInTimezone, isInsideActiveWindow } from "./time";
 import type { GroupRow, GroupSource, LineEvent, RoundRow, TextMessage } from "./types";
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
+export const ROUND_INTERVAL_MINUTES = 45;
+const ROUND_INTERVAL_MS = ROUND_INTERVAL_MINUTES * 60 * 1000;
 
 function textMessage(text: string): TextMessage {
   return { type: "text", text };
 }
 
-function chunk<T>(items: T[], size: number): T[][] {
-  const result: T[][] = [];
-  for (let index = 0; index < items.length; index += size) {
-    result.push(items.slice(index, index + size));
-  }
-  return result;
-}
-
 function isGroupSource(source: LineEvent["source"]): source is GroupSource {
   return source.type === "group";
+}
+
+export function buildStartConfirmation(group: GroupRow, now: number): string {
+  const insideActiveWindow = isInsideActiveWindow(
+    new Date(now),
+    group.timezone,
+    group.active_start,
+    group.active_end,
+  );
+  if (insideActiveWindow) {
+    return "▶️ 提醒已啟用。你是本群管理者；第一輪會在下一次排程檢查時送出（最多約 5 分鐘）。";
+  }
+
+  const timezoneLabel = group.timezone === "Asia/Taipei" ? "台灣時間" : group.timezone;
+  return `▶️ 提醒已啟用。你是本群管理者；目前不在${timezoneLabel} ${group.active_start}–${group.active_end} 的提醒時段，進入時段後約 5 分鐘內開始第一輪。`;
 }
 
 export class BotService {
@@ -61,6 +70,7 @@ export class BotService {
               .filter((member): member is { type: "user"; userId: string } => member.type === "user")
               .map((member) => member.userId) ?? [];
           await this.repository.deactivateParticipants(groupId, userIds, now);
+          await this.repository.releaseAdminIfLeft(groupId, userIds, now);
           break;
         }
         case "message":
@@ -79,9 +89,11 @@ export class BotService {
   }
 
   async runScheduler(now: number): Promise<void> {
+    await this.repository.closeInactiveOrExpiredRounds(now);
     const dueGroups = await this.repository.listDueGroups(now);
 
     for (const group of dueGroups) {
+      let claimedNextRunAt: number | null = null;
       try {
         const insideActiveWindow = isInsideActiveWindow(
           new Date(now),
@@ -90,15 +102,24 @@ export class BotService {
           group.active_end,
         );
         const nextRunAt = insideActiveWindow
-          ? now + group.interval_minutes * 60 * 1000
+          ? now + ROUND_INTERVAL_MS
           : now + FIVE_MINUTES_MS;
         const claimed = await this.repository.claimNextRound(group, nextRunAt, now);
         if (!claimed) continue;
+        claimedNextRunAt = nextRunAt;
 
         if (insideActiveWindow) {
           await this.createRound(group, now);
         }
       } catch (error) {
+        if (claimedNextRunAt !== null) {
+          await this.repository.rescheduleClaimedNextRound(
+            group.group_id,
+            claimedNextRunAt,
+            now + FIVE_MINUTES_MS,
+            now,
+          );
+        }
         console.error(
           JSON.stringify({
             event: "scheduled_group_failed",
@@ -108,8 +129,6 @@ export class BotService {
         );
       }
     }
-
-    await this.processOpenRounds(now);
   }
 
   private async handleMessage(event: LineEvent, groupId: string, now: number): Promise<void> {
@@ -141,10 +160,11 @@ export class BotService {
       case "start": {
         await this.registerParticipant(groupId, userId, now);
         const result = await this.repository.enableGroup(groupId, userId, now);
+        const group = result === "enabled" ? await this.repository.getGroup(groupId) : null;
         await this.replyText(
           event.replyToken,
-          result === "enabled"
-            ? "▶️ 提醒已啟用。你是本群管理者；排程會在 5 分鐘內開始第一輪。"
+          result === "enabled" && group
+            ? buildStartConfirmation(group, now)
             : "只有本群提醒管理者可以開始排程。",
         );
         break;
@@ -244,6 +264,11 @@ export class BotService {
       return;
     }
 
+    if (!group.enabled) {
+      await this.replyText(event.replyToken, "排程目前已暫停；請先輸入「開始提醒」，再使用立即提醒。");
+      return;
+    }
+
     const currentRound = await this.repository.getLatestOpenRound(groupId, now);
     if (currentRound) {
       await this.replyText(event.replyToken, "目前已有進行中的活動回合。");
@@ -251,21 +276,26 @@ export class BotService {
     }
 
     const created = await this.createRound(group, now);
-    if (!created) {
+    if (created === "no-participants") {
       await this.replyText(event.replyToken, "目前還沒有參加者，請先請成員輸入「參加」。");
+    } else if (created === "already-open") {
+      await this.replyText(event.replyToken, "目前已有進行中的活動回合。");
     }
   }
 
-  private async createRound(group: GroupRow, now: number): Promise<boolean> {
+  private async createRound(
+    group: GroupRow,
+    now: number,
+  ): Promise<"created" | "already-open" | "no-participants"> {
+    await this.repository.closeExpiredRoundsForGroup(group.group_id, now);
     const existingRound = await this.repository.getLatestOpenRound(group.group_id, now);
-    if (existingRound) return false;
+    if (existingRound) return "already-open";
 
     const participants = await this.repository.listActiveParticipants(group.group_id);
-    if (participants.length === 0) return false;
+    if (participants.length === 0) return "no-participants";
 
     const roundId = crypto.randomUUID();
-    const closesAt =
-      now + group.reminder_interval_minutes * (group.max_reminders + 1) * 60 * 1000;
+    const closesAt = now + ROUND_INTERVAL_MS;
     const round: RoundRow = {
       round_id: roundId,
       group_id: group.group_id,
@@ -276,70 +306,15 @@ export class BotService {
       created_at: now,
     };
 
-    await this.repository.createRound(round);
+    const inserted = await this.repository.createRound(round);
+    if (!inserted) return "already-open";
     try {
       const closesAtLabel = formatTimeInTimezone(closesAt, group.timezone);
-      await this.line.push(group.group_id, buildRoundMessages(roundId, closesAtLabel));
-      return true;
+      await this.line.push(group.group_id, buildRoundMessages(roundId, closesAtLabel), roundId);
+      return "created";
     } catch (error) {
       await this.repository.closeRound(roundId);
       throw error;
-    }
-  }
-
-  private async processOpenRounds(now: number): Promise<void> {
-    const rounds = await this.repository.listOpenRounds();
-
-    for (const round of rounds) {
-      try {
-        const group = await this.repository.getGroup(round.group_id);
-        if (!group || !group.enabled || round.closes_at <= now) {
-          await this.repository.closeRound(round.round_id);
-          continue;
-        }
-
-        const reminderMs = group.reminder_interval_minutes * 60 * 1000;
-        const targetStage = Math.floor((now - round.started_at) / reminderMs);
-        if (targetStage <= round.reminder_stage) continue;
-        if (targetStage > group.max_reminders) {
-          await this.repository.closeRound(round.round_id);
-          continue;
-        }
-
-        const claimed = await this.repository.claimReminder(
-          round.round_id,
-          round.reminder_stage,
-          targetStage,
-        );
-        if (!claimed) continue;
-
-        const pending = await this.repository.listPendingParticipants(
-          round.round_id,
-          round.group_id,
-        );
-        if (pending.length === 0) {
-          await this.repository.closeRound(round.round_id);
-          continue;
-        }
-
-        const mentionMessages = chunk(
-          pending.map((participant) => participant.user_id),
-          20,
-        ).map((userIds) => buildPendingMentionMessage(userIds, targetStage));
-
-        for (const messageBatch of chunk(mentionMessages, 5)) {
-          await this.line.push(round.group_id, messageBatch);
-        }
-      } catch (error) {
-        console.error(
-          JSON.stringify({
-            event: "round_reminder_failed",
-            roundId: round.round_id,
-            groupId: round.group_id,
-            error: error instanceof Error ? error.message : String(error),
-          }),
-        );
-      }
     }
   }
 

@@ -78,6 +78,22 @@ export class Repository {
     return (result.meta.changes ?? 0) === 1;
   }
 
+  async rescheduleClaimedNextRound(
+    groupId: string,
+    claimedNextRunAt: number,
+    retryAt: number,
+    now: number,
+  ): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE groups
+         SET next_run_at = ?1, updated_at = ?2
+         WHERE group_id = ?3 AND enabled = 1 AND next_run_at = ?4`,
+      )
+      .bind(retryAt, now, groupId, claimedNextRunAt)
+      .run();
+  }
+
   async enableGroup(groupId: string, userId: string, now: number): Promise<"enabled" | "forbidden"> {
     const result = await this.db
       .prepare(
@@ -112,7 +128,9 @@ export class Repository {
     await this.db.batch([
       this.db
         .prepare(
-          "UPDATE groups SET enabled = 0, next_run_at = NULL, updated_at = ?1 WHERE group_id = ?2",
+          `UPDATE groups
+           SET enabled = 0, admin_user_id = NULL, next_run_at = NULL, updated_at = ?1
+           WHERE group_id = ?2`,
         )
         .bind(now, groupId),
       this.db
@@ -164,6 +182,26 @@ export class Repository {
     await this.db.batch(statements);
   }
 
+  async releaseAdminIfLeft(groupId: string, userIds: string[], now: number): Promise<boolean> {
+    if (userIds.length === 0) return false;
+    const placeholders = userIds.map((_, index) => `?${index + 3}`).join(", ");
+    const result = await this.db
+      .prepare(
+        `UPDATE groups
+         SET admin_user_id = NULL, enabled = 0, next_run_at = NULL, updated_at = ?1
+         WHERE group_id = ?2 AND admin_user_id IN (${placeholders})`,
+      )
+      .bind(now, groupId, ...userIds)
+      .run();
+    if ((result.meta.changes ?? 0) !== 1) return false;
+
+    await this.db
+      .prepare("UPDATE rounds SET status = 'closed' WHERE group_id = ?1 AND status = 'open'")
+      .bind(groupId)
+      .run();
+    return true;
+  }
+
   async listActiveParticipants(groupId: string): Promise<ParticipantRow[]> {
     const result = await this.db
       .prepare(
@@ -176,25 +214,13 @@ export class Repository {
     return result.results;
   }
 
-  async listPendingParticipants(roundId: string, groupId: string): Promise<ParticipantRow[]> {
+  async createRound(round: RoundRow): Promise<boolean> {
     const result = await this.db
-      .prepare(
-        `SELECT p.* FROM participants p
-         LEFT JOIN responses r ON r.round_id = ?1 AND r.user_id = p.user_id
-         WHERE p.group_id = ?2 AND p.active = 1 AND r.user_id IS NULL
-         ORDER BY p.joined_at ASC`,
-      )
-      .bind(roundId, groupId)
-      .all<ParticipantRow>();
-    return result.results;
-  }
-
-  async createRound(round: RoundRow): Promise<void> {
-    await this.db
       .prepare(
         `INSERT INTO rounds (
           round_id, group_id, started_at, closes_at, reminder_stage, status, created_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        ON CONFLICT(group_id) WHERE status = 'open' DO NOTHING`,
       )
       .bind(
         round.round_id,
@@ -206,6 +232,7 @@ export class Repository {
         round.created_at,
       )
       .run();
+    return (result.meta.changes ?? 0) === 1;
   }
 
   async getRound(roundId: string, groupId: string): Promise<RoundRow | null> {
@@ -226,22 +253,29 @@ export class Repository {
       .first<RoundRow>();
   }
 
-  async listOpenRounds(): Promise<RoundRow[]> {
-    const result = await this.db
-      .prepare("SELECT * FROM rounds WHERE status = 'open' ORDER BY started_at ASC")
-      .all<RoundRow>();
-    return result.results;
+  async closeExpiredRoundsForGroup(groupId: string, now: number): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE rounds SET status = 'closed'
+         WHERE group_id = ?1 AND status = 'open' AND closes_at <= ?2`,
+      )
+      .bind(groupId, now)
+      .run();
   }
 
-  async claimReminder(roundId: string, previousStage: number, nextStage: number): Promise<boolean> {
-    const result = await this.db
+  async closeInactiveOrExpiredRounds(now: number): Promise<void> {
+    await this.db
       .prepare(
-        `UPDATE rounds SET reminder_stage = ?1
-         WHERE round_id = ?2 AND status = 'open' AND reminder_stage = ?3`,
+        `UPDATE rounds SET status = 'closed'
+         WHERE status = 'open' AND (
+           closes_at <= ?1 OR NOT EXISTS (
+             SELECT 1 FROM groups
+             WHERE groups.group_id = rounds.group_id AND groups.enabled = 1
+           )
+         )`,
       )
-      .bind(nextStage, roundId, previousStage)
+      .bind(now)
       .run();
-    return (result.meta.changes ?? 0) === 1;
   }
 
   async closeRound(roundId: string): Promise<void> {
