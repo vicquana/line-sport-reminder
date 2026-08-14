@@ -173,7 +173,7 @@ export class BotService {
         const result = await this.repository.pauseGroup(groupId, userId, now);
         await this.replyText(
           event.replyToken,
-          result === "paused" ? "⏸️ 已暫停後續提醒。" : "只有本群提醒管理者可以暫停排程。",
+          result === "paused" ? "⏸️ 已暫停後續主提醒。" : "只有本群提醒管理者可以暫停排程。",
         );
         break;
       }
