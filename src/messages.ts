@@ -1,5 +1,7 @@
 import type { FlexMessage, LineMessage, TextV2Message } from "./types";
 
+export const CARD_PRIMARY_COLOR = "#15803D";
+
 export const HELP_TEXT = [
   "🏃 活動提醒 Bot 指令",
   "參加：加入活動名單",
@@ -32,7 +34,7 @@ export function buildRoundMessages(roundId: string, closesAtLabel: string): Line
       header: {
         type: "box",
         layout: "vertical",
-        backgroundColor: "#16A34A",
+        backgroundColor: CARD_PRIMARY_COLOR,
         paddingAll: "20px",
         contents: [
           {
@@ -70,7 +72,7 @@ export function buildRoundMessages(roundId: string, closesAtLabel: string): Line
           {
             type: "button",
             style: "primary",
-            color: "#16A34A",
+            color: CARD_PRIMARY_COLOR,
             height: "sm",
             action: {
               type: "postback",
